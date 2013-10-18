@@ -2,10 +2,15 @@
 
 extern "C" {
 __global__
-void kernelMain(int *iTab, int*jTab){
+void kernelMain(int *iTab, int *jTab, const unsigned int *arg){
     //int thid = (blockIdx.x * blockDim.x) + threadIdx.x;
-    const int i=blockIdx.x,j=blockIdx.y;
-    const int rowSize=gridDim.y;
+    const unsigned int n=arg[0],m=arg[1];
+    const unsigned int i=blockIdx.x*blockDim.x+threadIdx.x;
+    const unsigned int j=blockIdx.y*blockDim.y+threadIdx.y;
+    const int rowSize=m;
+
+    if(i>=n || j>=m)
+        return;
 
     int a=i+1,b=j+1;
     int x=0,lastX=1;

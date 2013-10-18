@@ -59,20 +59,36 @@ int main(){
     unsigned int n,m;
     scanf("%u%u",&n,&m);
 
-    CUdeviceptr xTab,yTab;
+    CUdeviceptr xTab,yTab,arg;
     checkResult(cuMemAlloc(&xTab,n*m*sizeof(int)));
     checkResult(cuMemAlloc(&yTab,n*m*sizeof(int)));
+    checkResult(cuMemAlloc(&arg,2*sizeof(int)));
 
-    void* args[] = {&xTab,&yTab};
+    unsigned int data[]={n,m};
 
-    res = cuLaunchKernel(helloWorld, n, m, 1, 1, 1, 1, 0, 0, args, 0);
+    cuMemcpyHtoD(arg,data,2*sizeof(int));
+
+    void* args[] = {&xTab,&yTab,&arg};
+
+    const unsigned int blockSize=32;
+
+    const unsigned int gridWidth=n/blockSize+(n%blockSize!=0);
+    const unsigned int gridHeight=m/blockSize+(m%blockSize!=0);
+
+    res = cuLaunchKernel(helloWorld, gridWidth, gridHeight, 1,
+                         blockSize, blockSize, 1, 0, 0, args, 0);
+
     if (res != CUDA_SUCCESS){
         printf("cannot run kernel\n");
         exit(1);
     }
 
-    int *xTabHost=reinterpret_cast<int*>(malloc(n*m*sizeof(int)));
-    int *yTabHost=reinterpret_cast<int*>(malloc(n*m*sizeof(int)));
+//     int *xTabHost=reinterpret_cast<int*>(malloc(n*m*sizeof(int)));
+//     int *yTabHost=reinterpret_cast<int*>(malloc(n*m*sizeof(int)));
+
+    int *xTabHost,*yTabHost;
+    checkResult(cuMemAllocHost(reinterpret_cast<void**>(&xTabHost),n*m*sizeof(int)));
+    checkResult(cuMemAllocHost(reinterpret_cast<void**>(&yTabHost),n*m*sizeof(int)));
 
     cuCtxSynchronize();
 
@@ -81,8 +97,7 @@ int main(){
 
     cuMemFree(xTab);
     cuMemFree(yTab);
-
-    cuCtxDestroy(cuContext);
+    cuMemFree(arg);
 
     for(unsigned int i=0;i<n;++i)
     {
@@ -92,8 +107,13 @@ int main(){
         }
     }
 
-    free(xTabHost);
-    free(yTabHost);
+//     free(xTabHost);
+//     free(yTabHost);
+    cuMemFreeHost(xTabHost);
+    cuMemFreeHost(yTabHost);
+
+
+    cuCtxDestroy(cuContext);
 
     return 0;
 }
