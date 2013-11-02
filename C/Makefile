@@ -17,10 +17,10 @@ LIB_CUDA := -L/usr/lib/nvidia-current -lcuda
 NVCCOPTIONS = -arch sm_20 -ptx
 
 # Common flags
-COMMONFLAGS += $(INCLUDES)
+COMMONFLAGS += $(INCLUDES) -DDEBUG
 NVCCFLAGS += $(COMMONFLAGS) $(NVCCOPTIONS)
-CXXFLAGS += $(COMMONFLAGS)
-CFLAGS += $(COMMONFLAGS)
+CXXFLAGS += $(COMMONFLAGS) -g3
+CFLAGS += $(COMMONFLAGS) -g3
 
 CUDA_OBJS = cuMin.ptx 
 OBJS = demo.cpp.o cuMin.cpp.o

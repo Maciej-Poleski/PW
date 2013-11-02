@@ -1,5 +1,2 @@
 
-
-
-int* transpose(int* matrix, int height, int width);
-
+int cuMin(int* T, int n);

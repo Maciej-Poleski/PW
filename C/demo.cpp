@@ -1,32 +1,17 @@
-#include "transpose.h"
+#include "cuMin.h"
 #include <cstdio>
+#include <climits>
+
 using namespace std;
-
-void dump(int *tab,int width,int height)
-{
-    for(int i=0;i<height;++i)
-    {
-        for(int j=0;j<width;++j)
-        {
-            printf("%d ",tab[width*i+j]);
-        }
-        printf("\n");
-    }
-}
-
 int main(){
-    int *c, *d;
-    int n=2*32, m=2*32;
-    c = new int[m*n];
-    for (int j=0; j<n; ++j){
-        for (int i=0; i<m; ++i){
-            c[j*m + i] = i%5;
-        }
+    int *c;
+    int n = (1<<17)+52;
+    c = new int [n];
+    for(int i = 0; i < n; ++i ) {
+        c[i] = n-i+5;
     }
-    dump(c,m,n);
-    d = transpose(c, n, m);
-    dump(d,n,m);
-    delete [] c;
-    delete [] d;
+    int d = cuMin(c , n);
+    printf ("%d\n",d);
+    delete[]c;
     return 0;
 }
