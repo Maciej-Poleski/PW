@@ -3,6 +3,7 @@
 #include <cassert>
 #include <climits>
 #include <algorithm>
+#include <limits>
 
 const char* moduleName = "cuMin.ptx";
 const char* kernelName = "kernelMain";
@@ -24,8 +25,24 @@ static void checkResult_impl(CUresult result, int line)
 
 #include "cuMin.h"
 
+#define SERIAL_SCALE 2
+#define SERIAL_PART (1<<SERIAL_SCALE)
+
 static int smallMin(CUfunction, int*, int);
 static int bigMin(CUfunction, CUmodule , int* , int);
+
+static int universalMin(CUfunction kernel, CUdeviceptr input, CUdeviceptr output,
+                        unsigned int inputSize, unsigned int outputSize,
+                        unsigned int inputInitialized, unsigned int outputInitialized)
+__attribute__((optimize(3)));
+
+static unsigned int filledMemSize(unsigned int size) __attribute__((optimize(3)));
+static unsigned int filledMemSize(unsigned int size)
+{
+    if ((size & ((1 << (10+SERIAL_SCALE)) - 1)) == 0)
+        return size;
+    return (size & (~((1 << (10+SERIAL_SCALE)) - 1))) + (1 << (10+SERIAL_SCALE));
+}
 
 int cuMin(int* T, int n)
 {
@@ -67,21 +84,85 @@ int cuMin(int* T, int n)
 
     /********* TUTAJ JEST ROZWIĄZANIE **********/
 
+#ifdef DEBUG
+    assert(filledMemSize(1024) == SERIAL_PART*1024);
+    assert(filledMemSize(1) == SERIAL_PART*1024);
+    assert(filledMemSize(2) == SERIAL_PART*1024);
+    assert(filledMemSize(1023) == SERIAL_PART*1024);
+#endif
+
     checkResult(cuMemHostRegister(T, n * sizeof(int), 0));
 
+    CUdeviceptr inputD, outputD;
+    const unsigned int maxStepSize = 200000000;
+    int r = std::numeric_limits<int>::max();
+    for (unsigned int i = 0; i < n; i += maxStepSize) {
+        const unsigned int currentStepSize = std::min(n - i, maxStepSize);
+        const unsigned int inputSize = filledMemSize(currentStepSize),
+                           outputSize = filledMemSize(inputSize / (SERIAL_PART*1024));
+        checkResult(cuMemAlloc(&inputD, inputSize * sizeof(int)));
+        checkResult(cuMemAlloc(&outputD, outputSize * sizeof(int)));
 
-    int r;
+        checkResult(cuMemcpyHtoD(inputD, T+i, currentStepSize * sizeof(int)));
 
-    if (n <= (1 << 16))
-        r = smallMin(helloWorld, T, n);
-    else
-        r = bigMin(helloWorld, cuModule, T, n);
+        r = std::min(r, universalMin(helloWorld, inputD, outputD, inputSize, outputSize, currentStepSize, inputSize / (SERIAL_PART*1024)));
+
+        checkResult(cuMemFree(inputD));
+        checkResult(cuMemFree(outputD));
+    }
 
     cuCtxDestroy(cuContext);
 
 
     return r;
 }
+
+
+static int universalMin(CUfunction kernel, CUdeviceptr input, CUdeviceptr output,
+                        unsigned int inputSize, unsigned int outputSize,
+                        unsigned int inputInitialized, unsigned int outputInitialized)
+{
+    if (inputInitialized < inputSize || outputInitialized < outputSize) {
+        unsigned int fillSize = std::max(static_cast<int>(inputSize) - inputInitialized,
+                                         static_cast<int>(outputSize) - outputInitialized);
+        int* fill;
+        checkResult(cuMemAllocHost(reinterpret_cast<void**>(&fill), fillSize * sizeof(int)));
+        for (int* i = fill; i < fill + fillSize; ++i) // najwyżej 1023 obroty
+            *i = INT_MAX;
+
+        if (inputInitialized < inputSize) {
+            checkResult(cuMemcpyHtoD(input + inputInitialized * sizeof(int), fill, sizeof(int) * (inputSize - inputInitialized)));
+        }
+        if (outputInitialized < outputSize) {
+            checkResult(cuMemcpyHtoD(output + outputInitialized * sizeof(int), fill, sizeof(int) * (outputSize - outputInitialized)));
+        }
+        checkResult(cuMemFreeHost(fill));
+    }
+    const unsigned int maxGridSize=1U<<14;
+    for (unsigned int inputBegin = 0, outputBegin = 0; inputBegin < inputSize; inputBegin += (maxGridSize << (10+SERIAL_SCALE)), outputBegin += maxGridSize) {
+        CUdeviceptr inputForKernel = input + inputBegin * sizeof(int);
+        CUdeviceptr outputForKernel = output + outputBegin * sizeof(int);
+        void* args[] = {&inputForKernel, &outputForKernel};
+        assert(inputSize % (SERIAL_PART*1024) == 0);
+        assert(inputBegin % (SERIAL_PART*1024) == 0);
+        const unsigned int gridSize = std::min((inputSize - inputBegin) / (SERIAL_PART*1024), maxGridSize);
+        // Jeżeli wybrano mniej niż 1<<16 to jest to ostatni obieg pętli
+
+        checkResult(cuLaunchKernel(kernel, gridSize, 1, 1,
+                                   1024, 1, 1,
+                                   0, 0,
+                                   args, 0));
+        //checkResult(cuCtxSynchronize());
+    }
+    if (inputSize == (SERIAL_PART*1024)) {
+        int result;
+        checkResult(cuMemcpyDtoH(&result, output, sizeof(int)));
+        return result;
+    } else {
+        return universalMin(kernel, output, input, outputSize, filledMemSize(outputSize / (SERIAL_PART*1024)), outputSize, inputSize);
+    }
+}
+
 
 static int smallMinDevice(CUfunction, CUdeviceptr, int);
 
@@ -96,7 +177,7 @@ static int bigMin(CUfunction hw, CUmodule cuModule, int* T, int n)
 
     CUdeviceptr inputOnDevice, outputOnDevice, arg;
     checkResult(cuMemAlloc(&inputOnDevice, n * sizeof(int)));
-    checkResult(cuMemAlloc(&outputOnDevice, gridSize*1024* sizeof(int)));
+    checkResult(cuMemAlloc(&outputOnDevice, gridSize * 1024 * sizeof(int)));
     checkResult(cuMemAlloc(&arg, 2 * sizeof(int)));
 
     int data[] = {count, n};

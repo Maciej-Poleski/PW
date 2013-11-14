@@ -1,12 +1,23 @@
 #include <cstdio>
 #include <climits>
 
+#define SERIAL_SCALE 2
+
+#define SERIAL_PART (1<<SERIAL_SCALE)
+
 extern "C" {
 __global__
 void kernelMain(int *input, int *output){
     int thid = (blockIdx.x * blockDim.x) + threadIdx.x;
     __shared__ int mem[1024];
-    mem[threadIdx.x]=input[thid];
+    int m=input[thid*SERIAL_PART];
+    for(unsigned int i=1;i<SERIAL_PART;++i)
+    {
+        int t=input[thid*SERIAL_PART+i];
+        if(t<m)
+            m=t;
+    }
+    mem[threadIdx.x]=m;
     __syncthreads();
 
     for(unsigned int shift=1;shift<1024;shift*=2)
