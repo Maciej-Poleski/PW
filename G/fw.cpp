@@ -13,8 +13,9 @@ int fw(int * graph, int N, int * taskSizes, int ** taskElements, int K) {
 
     int max = INT_MIN;
 
+#pragma omp parallel
     for (int k = 0; k < N; ++k) {
-#pragma omp parallel for
+#pragma omp for collapse(2)
         for (int j = 0; j < N; ++j) {
             for (int i = 0; i < N; ++i) {
                 int temp = get(graph, i, k, N) + get(graph, k, j, N);
@@ -25,12 +26,14 @@ int fw(int * graph, int N, int * taskSizes, int ** taskElements, int K) {
         }
     }
 
-#pragma omp parallel for schedule(auto)
+#pragma omp parallel
+{
     for (int i = 0; i < K; ++i) {
 
         int taskSize = taskSizes[i];
         int * task = taskElements[i];
 
+#pragma omp task
         for (int j = 0; j < taskSize; ++j) {
             int localMax = INT_MIN;
             for (int k = 0; k < taskSize; ++k) {
@@ -52,9 +55,8 @@ int fw(int * graph, int N, int * taskSizes, int ** taskElements, int K) {
             }
         }
 
-
-
     }
+}
 
     return max;
 }
